@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clínica WG</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+
+<!-- ═══════════════ TELA DE AUTH (LOGIN / CADASTRO) ═══════════════ -->
+<div id="auth-overlay">
+  <div class="auth-bg">
+    <div class="auth-blob blob-1"></div>
+    <div class="auth-blob blob-2"></div>
+    <div class="auth-blob blob-3"></div>
+  </div>
+
+  <div class="auth-container">
+    <!-- Marca -->
+    <div class="auth-brand">
+      <div class="auth-logo-icon">C.O</div>
+      <div>
+        <div class="auth-brand-name">Clínica Odonto</div>
+        <div class="auth-brand-sub">Sistema de gestão</div>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="auth-card">
+
+      <!-- Abas -->
+      <div class="auth-tabs">
+        <button class="auth-tab ativo" id="tab-login" onclick="trocarAba('login')">Entrar</button>
+        <button class="auth-tab" id="tab-cadastro" onclick="trocarAba('cadastro')">Criar conta</button>
+        <div class="auth-tab-slider" id="tab-slider"></div>
+      </div>
+
+      <!-- Formulário Login -->
+      <div class="auth-form" id="form-login">
+        <div class="auth-welcome">
+          <h2>Bem-vindo de volta</h2>
+          <p>Acesse sua conta para continuar</p>
+        </div>
+
+        <div class="auth-field">
+          <label>E-mail</label>
+          <input type="email" id="login-email" placeholder="seu@email.com" autocomplete="email">
+        </div>
+
+        <div class="auth-field">
+          <label>Senha</label>
+          <div class="input-senha">
+            <input type="password" id="login-senha" placeholder="••••••••" autocomplete="current-password">
+            <button class="toggle-senha" onclick="toggleSenha('login-senha', this)" tabindex="-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="auth-erro" id="erro-login"></div>
+
+        <button class="auth-btn" onclick="fazerLogin()">
+          <span>Entrar</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+
+        <p class="auth-switch">
+          Não tem conta? <a href="#" onclick="trocarAba('cadastro')">Criar conta grátis</a>
+        </p>
+      </div>
+
+      <!-- Formulário Cadastro -->
+      <div class="auth-form oculto" id="form-cadastro">
+        <div class="auth-welcome">
+          <h2>Criar sua conta</h2>
+          <p>Preencha os dados para começar</p>
+        </div>
+
+        <div class="auth-field">
+          <label>Nome completo</label>
+          <input type="text" id="cad-nome" placeholder="Dr. João Silva" autocomplete="name">
+        </div>
+
+        <div class="auth-field">
+          <label>E-mail</label>
+          <input type="email" id="cad-email" placeholder="seu@email.com" autocomplete="email">
+        </div>
+
+        <div class="auth-field">
+          <label>Senha</label>
+          <div class="input-senha">
+            <input type="password" id="cad-senha" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
+            <button class="toggle-senha" onclick="toggleSenha('cad-senha', this)" tabindex="-1">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="auth-erro" id="erro-cadastro"></div>
+
+        <button class="auth-btn" onclick="fazerCadastro()">
+          <span>Criar conta</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+
+        <p class="auth-switch">
+          Já tem conta? <a href="#" onclick="trocarAba('login')">Fazer login</a>
+        </p>
+      </div>
+
+    </div><!-- /auth-card -->
+  </div><!-- /auth-container -->
+</div><!-- /auth-overlay -->
+
+
+<!-- ═══════════════ SISTEMA PRINCIPAL ═══════════════ -->
+<div id="sistema" class="oculto">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="marca">Clínica WG</div>
+      <div class="sub">Sistema de gestão</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <span class="nav-label">Principal</span>
+      <button class="nav-item ativo" onclick="navegar('dashboard', this)">Dashboard</button>
+      <button class="nav-item" onclick="navegar('agendamentos', this)">Agendamentos</button>
+      <button class="nav-item" onclick="navegar('clientes', this)">Clientes</button>
+      <button class="nav-item" onclick="navegar('whatsapp', this)">WhatsApp</button>
+      <span class="nav-label">Sistema</span>
+      <button class="nav-item" onclick="navegar('configuracoes', this)">Configurações</button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-pill">
+        <div class="user-avatar" id="user-avatar">--</div>
+        <div class="user-info">
+          <div class="nome" id="user-nome">Usuário</div>
+          <div class="cargo">Administrador</div>
+        </div>
+      </div>
+      <button class="btn-logout" onclick="fazerLogout()" title="Sair">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="tela ativa" id="tela-dashboard">
+      <h1>Dashboard</h1>
+      <p>Sistema carregado com sucesso 🚀</p>
+    </section>
+  </main>
+
+</div><!-- /sistema -->
+
+<script src="auth.js"></script>
+<script type="module" src="script.js"></script>
+</body>
+</html>
