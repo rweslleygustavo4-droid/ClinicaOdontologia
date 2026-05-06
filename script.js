@@ -1,467 +1,524 @@
-// ════════════════════════════════════════════════════════════
-//  script.js — Clínica WG × Supabase
-//  Substitua SUPABASE_URL e SUPABASE_KEY pelos seus valores:
-//  Supabase → Settings → API → Project URL e anon public key
-// ════════════════════════════════════════════════════════════
-
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
-
-const SUPABASE_URL = 'https://uiymqxqxtqfnmxrkmxpe.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_AWtSaoqQLAHi50SpWTFrNw_sd3ujEQV';
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-
-// ════════════════════════════════════════════════════════════
-//  ESTRUTURA ESPERADA NO SUPABASE
-//
-//  Tabela: clientes
-//  ┌─────────────────┬──────────────────────────────────────┐
-//  │ id              │ uuid (PK, default: gen_random_uuid()) │
-//  │ nome            │ text NOT NULL                         │
-//  │ telefone        │ text                                  │
-//  │ email           │ text                                  │
-//  │ data_nascimento │ date                                  │
-//  │ status          │ text ('Ativo' ou 'Inativo')           │
-//  │ created_at      │ timestamptz (default: now())          │
-//  └─────────────────┴──────────────────────────────────────┘
-//
-//  Tabela: agendamentos
-//  ┌─────────────────┬──────────────────────────────────────┐
-//  │ id              │ uuid (PK, default: gen_random_uuid()) │
-//  │ cliente_id      │ uuid (FK → clientes.id)              │
-//  │ data            │ date NOT NULL                         │
-//  │ hora            │ time NOT NULL                         │
-//  │ tipo            │ text (ex: 'Retorno', 'Primeira...')  │
-//  │ status          │ text ('Confirmado','Aguardando',      │
-//  │                 │       'Realizado','Faltou')           │
-//  │ observacoes     │ text                                  │
-//  │ created_at      │ timestamptz (default: now())          │
-//  └─────────────────┴──────────────────────────────────────┘
-// ════════════════════════════════════════════════════════════
-
-
-// ────────────────────────────────────────────────────────────
-//  UTILITÁRIOS
-// ────────────────────────────────────────────────────────────
-
-function dataHoje() {
-  return new Date().toISOString().split('T')[0]; // 'YYYY-MM-DD'
-}
-
-function formatarData(dataISO) {
-  if (!dataISO) return '—';
-  const [ano, mes, dia] = dataISO.split('-');
-  return `${dia}/${mes}/${ano}`;
-}
-
-function iniciaisDe(nome) {
-  return nome
-    .split(' ')
-    .slice(0, 2)
-    .map(p => p[0].toUpperCase())
-    .join('');
-}
-
-function mostrarErro(msg) {
-  console.error('[WG]', msg);
-  // Troque por um toast/modal se quiser feedback visual
-}
-
-
-// ════════════════════════════════════════════════════════════
-//  CLIENTES
-// ════════════════════════════════════════════════════════════
-
-/**
- * Busca todos os clientes (ou filtra pelo nome).
- * @param {string} busca — texto livre para filtrar (opcional)
- * @returns {Array} lista de clientes
- */
-async function buscarClientes(busca = '') {
-  let query = supabase
-    .from('clientes')
-    .select('*')
-    .order('nome', { ascending: true });
-
-  if (busca.trim()) {
-    query = query.ilike('nome', `%${busca}%`);
-  }
-
-  const { data, error } = await query;
-
-  if (error) { mostrarErro(error.message); return []; }
-  return data;
-}
-
-/**
- * Busca um único cliente pelo ID.
- * @param {string} id — UUID do cliente
- */
-async function buscarClientePorId(id) {
-  const { data, error } = await supabase
-    .from('clientes')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) { mostrarErro(error.message); return null; }
-  return data;
-}
-
-/**
- * Cria um novo cliente.
- * @param {Object} cliente — { nome, telefone, email, data_nascimento, status }
- * @returns {Object|null} cliente criado
- */
-async function criarCliente(cliente) {
-  const payload = {
-    nome:            cliente.nome,
-    telefone:        cliente.telefone        || null,
-    email:           cliente.email           || null,
-    data_nascimento: cliente.data_nascimento || null,
-    status:          cliente.status          || 'Ativo',
-  };
-
-  const { data, error } = await supabase
-    .from('clientes')
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) { mostrarErro(error.message); return null; }
-  return data;
-}
-
-/**
- * Atualiza um cliente existente.
- * @param {string} id     — UUID do cliente
- * @param {Object} campos — campos a atualizar
- * @returns {Object|null} cliente atualizado
- */
-async function atualizarCliente(id, campos) {
-  const { data, error } = await supabase
-    .from('clientes')
-    .update(campos)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) { mostrarErro(error.message); return null; }
-  return data;
-}
-
-/**
- * Remove um cliente pelo ID.
- * @param {string} id — UUID do cliente
- * @returns {boolean} true se removido com sucesso
- */
-async function removerCliente(id) {
-  const { error } = await supabase
-    .from('clientes')
-    .delete()
-    .eq('id', id);
-
-  if (error) { mostrarErro(error.message); return false; }
-  return true;
-}
-
-
-// ════════════════════════════════════════════════════════════
-//  AGENDAMENTOS
-// ════════════════════════════════════════════════════════════
-
-/**
- * Busca todos os agendamentos de uma data específica,
- * trazendo junto os dados do cliente (join).
- * @param {string} data — 'YYYY-MM-DD' (padrão: hoje)
- * @returns {Array} lista de agendamentos com dados do cliente
- */
-async function buscarAgendamentosDodia(data = dataHoje()) {
-  const { data: rows, error } = await supabase
-    .from('agendamentos')
-    .select(`
-      *,
-      clientes ( id, nome, telefone )
-    `)
-    .eq('data', data)
-    .order('hora', { ascending: true });
-
-  if (error) { mostrarErro(error.message); return []; }
-  return rows;
-}
-
-/**
- * Busca agendamentos dentro de um intervalo de datas.
- * @param {string} de  — 'YYYY-MM-DD'
- * @param {string} ate — 'YYYY-MM-DD'
- */
-async function buscarAgendamentosPorPeriodo(de, ate) {
-  const { data, error } = await supabase
-    .from('agendamentos')
-    .select(`
-      *,
-      clientes ( id, nome, telefone )
-    `)
-    .gte('data', de)
-    .lte('data', ate)
-    .order('data', { ascending: true })
-    .order('hora', { ascending: true });
-
-  if (error) { mostrarErro(error.message); return []; }
-  return data;
-}
-
-/**
- * Cria um novo agendamento.
- * @param {Object} ag — { cliente_id, data, hora, tipo, status, observacoes }
- * @returns {Object|null} agendamento criado
- */
-async function criarAgendamento(ag) {
-  const payload = {
-    cliente_id:  ag.cliente_id,
-    data:        ag.data,
-    hora:        ag.hora,
-    tipo:        ag.tipo        || 'Consulta',
-    status:      ag.status      || 'Aguardando',
-    observacoes: ag.observacoes || null,
-  };
-
-  const { data, error } = await supabase
-    .from('agendamentos')
-    .insert([payload])
-    .select()
-    .single();
-
-  if (error) { mostrarErro(error.message); return null; }
-  return data;
-}
-
-/**
- * Atualiza o status de um agendamento.
- * @param {string} id     — UUID do agendamento
- * @param {string} status — 'Confirmado' | 'Aguardando' | 'Realizado' | 'Faltou'
- */
-async function atualizarStatusAgendamento(id, status) {
-  const { data, error } = await supabase
-    .from('agendamentos')
-    .update({ status })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) { mostrarErro(error.message); return null; }
-  return data;
-}
-
-/**
- * Atualiza qualquer campo de um agendamento.
- * @param {string} id     — UUID
- * @param {Object} campos — campos a atualizar
- */
-async function atualizarAgendamento(id, campos) {
-  const { data, error } = await supabase
-    .from('agendamentos')
-    .update(campos)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) { mostrarErro(error.message); return null; }
-  return data;
-}
-
-/**
- * Remove um agendamento pelo ID.
- * @param {string} id — UUID
- * @returns {boolean}
- */
-async function removerAgendamento(id) {
-  const { error } = await supabase
-    .from('agendamentos')
-    .delete()
-    .eq('id', id);
-
-  if (error) { mostrarErro(error.message); return false; }
-  return true;
-}
-
-
-// ════════════════════════════════════════════════════════════
-//  DASHBOARD — métricas calculadas
-// ════════════════════════════════════════════════════════════
-
-/**
- * Retorna os KPIs principais para o Dashboard.
- * @returns {Object} { totalClientes, consultasHoje, faltasHoje, proximaConsulta }
- */
-async function buscarKPIs() {
-  const hoje = dataHoje();
-
-  const [
-    { count: totalClientes },
-    agendamentosHoje,
-  ] = await Promise.all([
-    supabase.from('clientes').select('*', { count: 'exact', head: true }),
-    buscarAgendamentosDodia(hoje),
-  ]);
-
-  const consultasHoje = agendamentosHoje.length;
-  const faltasHoje    = agendamentosHoje.filter(a => a.status === 'Faltou').length;
-
-  const agora = new Date().toTimeString().slice(0, 5); // 'HH:MM'
-  const proxima = agendamentosHoje.find(a =>
-    a.hora > agora && ['Confirmado', 'Aguardando'].includes(a.status)
-  );
-
-  return {
-    totalClientes:   totalClientes ?? 0,
-    consultasHoje,
-    faltasHoje,
-    proximaConsulta: proxima ?? null,
-  };
-}
-
-/**
- * Retorna dias do mês/ano que têm pelo menos 1 agendamento.
- * Útil para pintar o calendário.
- * @param {number} ano
- * @param {number} mes — 0-indexado (igual ao JS Date)
- * @returns {Array<number>} lista de dias (ex: [3, 7, 14, 22])
- */
-async function buscarDiasComAgendamento(ano, mes) {
-  const de  = `${ano}-${String(mes + 1).padStart(2, '0')}-01`;
-  const ate = `${ano}-${String(mes + 1).padStart(2, '0')}-${new Date(ano, mes + 1, 0).getDate()}`;
-
-  const { data, error } = await supabase
-    .from('agendamentos')
-    .select('data')
-    .gte('data', de)
-    .lte('data', ate);
-
-  if (error) { mostrarErro(error.message); return []; }
-
-  const dias = [...new Set(data.map(a => parseInt(a.data.split('-')[2])))];
-  return dias;
-}
-
-
-// ════════════════════════════════════════════════════════════
-//  TEMPO REAL (Realtime)
-//  Descomente o bloco abaixo se quiser atualização automática
-//  na tela quando outro usuário fizer uma alteração.
-// ════════════════════════════════════════════════════════════
-
-/*
-supabase
-  .channel('agendamentos-realtime')
-  .on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'agendamentos' },
-    (payload) => {
-      console.log('[Realtime] agendamentos:', payload);
-      // Chame aqui a função que re-renderiza a tela, ex:
-      // carregarAgenda();
-    }
-  )
-  .subscribe();
-
-supabase
-  .channel('clientes-realtime')
-  .on(
-    'postgres_changes',
-    { event: '*', schema: 'public', table: 'clientes' },
-    (payload) => {
-      console.log('[Realtime] clientes:', payload);
-      // carregarClientes();
-    }
-  )
-  .subscribe();
-*/
-
-
-// ════════════════════════════════════════════════════════════
-//  EXEMPLOS DE USO (como chamar as funções no seu HTML)
-// ════════════════════════════════════════════════════════════
-
-/*
-
-// ── Carregar agenda do dia no Dashboard ──
-const agenda = await buscarAgendamentosDodia();
-agenda.forEach(a => {
-  console.log(a.hora, a.clientes.nome, a.status);
-});
-
-// ── KPIs do Dashboard ──
-const kpis = await buscarKPIs();
-document.getElementById('total-clientes').textContent  = kpis.totalClientes;
-document.getElementById('consultas-hoje').textContent  = kpis.consultasHoje;
-document.getElementById('faltas').textContent          = kpis.faltasHoje;
-document.getElementById('proxima-hora').textContent    = kpis.proximaConsulta?.hora ?? '—';
-document.getElementById('proxima-nome').textContent    = kpis.proximaConsulta?.clientes?.nome ?? '—';
-
-// ── Buscar clientes (com filtro de busca) ──
-const clientes = await buscarClientes('Ana');
-renderClientes(clientes);   // sua função de renderização
-
-// ── Criar novo cliente ──
-const novo = await criarCliente({
-  nome: 'Maria Silva',
-  telefone: '(99) 99999-9999',
-  email: 'maria@email.com',
-  status: 'Ativo',
-});
-
-// ── Criar agendamento ──
-const ag = await criarAgendamento({
-  cliente_id: novo.id,
-  data: '2026-05-10',
-  hora: '14:30',
-  tipo: 'Primeira consulta',
-  status: 'Aguardando',
-});
-
-// ── Confirmar agendamento ──
-await atualizarStatusAgendamento(ag.id, 'Confirmado');
-
-// ── Remover cliente ──
-await removerCliente(novo.id);
-
-// ── Dias com consulta para o calendário ──
-const dias = await buscarDiasComAgendamento(2026, 4); // maio de 2026
-console.log('Dias com consulta:', dias); // [3, 7, 14, ...]
-
-*/
-
-
-// ════════════════════════════════════════════════════════════
-//  EXPORTAÇÕES
-//  Se estiver usando <script type="module"> no seu HTML,
-//  importe assim:
-//    import { buscarClientes, criarAgendamento, ... } from './script.js'
-// ════════════════════════════════════════════════════════════
-
-export {
-  supabase,
-  // Utilitários
-  dataHoje,
-  formatarData,
-  iniciaisDe,
-  // Clientes
-  buscarClientes,
-  buscarClientePorId,
-  criarCliente,
-  atualizarCliente,
-  removerCliente,
-  // Agendamentos
-  buscarAgendamentosDodia,
-  buscarAgendamentosPorPeriodo,
-  criarAgendamento,
-  atualizarStatusAgendamento,
-  atualizarAgendamento,
-  removerAgendamento,
-  // Dashboard
-  buscarKPIs,
-  buscarDiasComAgendamento,
+/* ═══════════════════════════════════════════
+   SCRIPT.JS — Lógica do Sistema Principal
+   Clínica WG
+   
+   Usa <script type="module">, então as funções
+   do api.js precisam estar disponíveis.
+   Como api.js é carregado antes sem módulo,
+   suas funções são globais.
+═══════════════════════════════════════════ */
+
+// ════════════════════════
+//  INIT (chamado pelo auth.js após login)
+// ════════════════════════
+
+window.iniciarSistema = async function(usuario) {
+  _usuarioAtual = usuario;
+  await carregarDashboard();
 };
 
+let _usuarioAtual = null;
+
+// ════════════════════════
+//  NAVEGAÇÃO
+// ════════════════════════
+
+function navegar(id, botao) {
+  document.querySelectorAll('.tela').forEach(t => t.classList.remove('ativa'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('ativo'));
+
+  const tela = document.getElementById('tela-' + id);
+  if (tela) tela.classList.add('ativa');
+  if (botao) botao.classList.add('ativo');
+
+  // Carrega dados da tela ao navegar
+  const loaders = {
+    dashboard:    carregarDashboard,
+    agendamentos: carregarAgendamentos,
+    clientes:     carregarClientes,
+    whatsapp:     carregarWhatsapp,
+    configuracoes: carregarConfiguracoes,
+  };
+  if (loaders[id]) loaders[id]();
+}
+
+// ════════════════════════
+//  DASHBOARD
+// ════════════════════════
+
+async function carregarDashboard() {
+  // Data no header
+  const dateEl = document.getElementById('dash-date');
+  if (dateEl) {
+    dateEl.textContent = new Date().toLocaleDateString('pt-br', {
+      weekday: 'long', day: 'numeric', month: 'long'
+    });
+  }
+
+  try {
+    const kpis = await getKPIs();
+
+    _setText('kpi-total-clientes', kpis.totalClientes);
+    _setText('kpi-consultas-hoje', kpis.consultasHoje);
+    _setText('kpi-faltas',         kpis.faltasHoje);
+
+    if (kpis.proximaConsulta) {
+      _setText('kpi-proxima', kpis.proximaConsulta.hora);
+      _setText('kpi-proxima-nome', kpis.proximaConsulta.clientes?.nome || 'Próxima consulta');
+    } else {
+      _setText('kpi-proxima', '—');
+      _setText('kpi-proxima-nome', 'Sem consultas pendentes');
+    }
+
+    // Agenda do dia
+    const agendamentos = await getAgendamentos();
+    const listaEl = document.getElementById('dash-agenda-lista');
+    if (listaEl) {
+      listaEl.innerHTML = agendamentos.length
+        ? agendamentos.map(a => _renderAgendaItem(a, false)).join('')
+        : '<div class="empty-state">Nenhuma consulta hoje 🎉</div>';
+    }
+  } catch (err) {
+    console.error('[Dashboard]', err);
+    mostrarToast('Erro ao carregar dashboard', 'error');
+  }
+}
+
+// ════════════════════════
+//  AGENDAMENTOS
+// ════════════════════════
+
+async function carregarAgendamentos() {
+  // Define data padrão = hoje
+  const filtroData = document.getElementById('filtro-data');
+  if (filtroData && !filtroData.value) {
+    filtroData.value = dataHoje();
+  }
+
+  const data   = filtroData?.value || dataHoje();
+  const status = document.getElementById('filtro-status')?.value || '';
+
+  const listaEl = document.getElementById('agend-lista');
+  if (!listaEl) return;
+  listaEl.innerHTML = '<div class="empty-state">Carregando...</div>';
+
+  try {
+    let ags = await getAgendamentos(data);
+    if (status) ags = ags.filter(a => a.status === status);
+
+    listaEl.innerHTML = ags.length
+      ? ags.map(a => _renderAgendaItem(a, true)).join('')
+      : '<div class="empty-state">Nenhum agendamento encontrado</div>';
+  } catch (err) {
+    console.error('[Agendamentos]', err);
+    listaEl.innerHTML = '<div class="empty-state">Erro ao carregar agendamentos</div>';
+  }
+}
+
+function _renderAgendaItem(ag, comAcoes) {
+  const cliente = ag.clientes;
+  const nome    = cliente?.nome || 'Paciente não encontrado';
+  const ini     = iniciaisDe(nome);
+  const badgeCls = _statusBadgeCls(ag.status);
+
+  const acoes = comAcoes ? `
+    <div class="agenda-acoes">
+      <select class="btn-tabela" style="min-width:130px" onchange="mudarStatusAgend('${ag.id}', this.value, this)">
+        <option value="Aguardando"  ${ag.status==='Aguardando'  ? 'selected':''}>Aguardando</option>
+        <option value="Confirmado"  ${ag.status==='Confirmado'  ? 'selected':''}>Confirmado</option>
+        <option value="Realizado"   ${ag.status==='Realizado'   ? 'selected':''}>Realizado</option>
+        <option value="Faltou"      ${ag.status==='Faltou'      ? 'selected':''}>Faltou</option>
+      </select>
+      <button class="btn-tabela btn-tabela--danger" onclick="excluirAgendamento('${ag.id}')">✕</button>
+    </div>
+  ` : `<span class="badge ${badgeCls}">${ag.status}</span>`;
+
+  return `
+    <div class="agenda-item" id="agend-${ag.id}">
+      <span class="agenda-hora">${ag.hora}</span>
+      <div class="agenda-avatar">${ini}</div>
+      <div class="agenda-info">
+        <div class="agenda-nome">${nome}</div>
+        <div class="agenda-tipo">${ag.tipo || 'Consulta'}${ag.observacoes ? ' · ' + ag.observacoes : ''}</div>
+      </div>
+      ${acoes}
+    </div>
+  `;
+}
+
+async function mudarStatusAgend(id, status, select) {
+  try {
+    await updateStatusAgendamento(id, status);
+    mostrarToast(`Status atualizado: ${status}`, 'success');
+  } catch (err) {
+    mostrarToast('Erro ao atualizar status', 'error');
+    console.error(err);
+    // Reverte o select visualmente na próxima renderização
+    carregarAgendamentos();
+  }
+}
+
+async function excluirAgendamento(id) {
+  if (!confirm('Remover este agendamento?')) return;
+  try {
+    await deleteAgendamento(id);
+    mostrarToast('Agendamento removido', 'success');
+    carregarAgendamentos();
+    carregarDashboard();
+  } catch (err) {
+    mostrarToast('Erro ao remover agendamento', 'error');
+  }
+}
+
+// Modal agendamento
+async function abrirModalAgendamento() {
+  // Popula select de clientes
+  const select = document.getElementById('ag-cliente');
+  const clientes = await getClientes();
+  select.innerHTML = '<option value="">— Selecione um paciente —</option>' +
+    clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('');
+
+  // Data padrão = hoje
+  const dataInput = document.getElementById('ag-data');
+  if (!dataInput.value) dataInput.value = dataHoje();
+
+  document.getElementById('modal-agendamento').classList.remove('oculto');
+}
+
+function fecharModal(id) {
+  document.getElementById(id).classList.add('oculto');
+}
+
+function fecharModalSeFora(event, id) {
+  if (event.target === event.currentTarget) fecharModal(id);
+}
+
+async function salvarAgendamento() {
+  const clienteId = document.getElementById('ag-cliente').value;
+  const data      = document.getElementById('ag-data').value;
+  const hora      = document.getElementById('ag-hora').value;
+  const tipo      = document.getElementById('ag-tipo').value;
+  const status    = document.getElementById('ag-status').value;
+  const obs       = document.getElementById('ag-obs').value;
+
+  if (!clienteId) { mostrarToast('Selecione um paciente', 'error'); return; }
+  if (!data)      { mostrarToast('Informe a data', 'error'); return; }
+  if (!hora)      { mostrarToast('Informe a hora', 'error'); return; }
+
+  try {
+    await createAgendamento({ cliente_id: clienteId, data, hora, tipo, status, observacoes: obs });
+    fecharModal('modal-agendamento');
+    mostrarToast('Agendamento criado!', 'success');
+    // Limpa campos
+    ['ag-cliente','ag-obs'].forEach(id => { const el = document.getElementById(id); if(el) el.value = ''; });
+    document.getElementById('ag-hora').value = '';
+    carregarAgendamentos();
+    carregarDashboard();
+  } catch (err) {
+    mostrarToast('Erro ao salvar agendamento', 'error');
+    console.error(err);
+  }
+}
+
+// ════════════════════════
+//  CLIENTES
+// ════════════════════════
+
+async function carregarClientes() {
+  const busca = document.getElementById('busca-cliente')?.value || '';
+  const tbody = document.getElementById('clientes-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Carregando...</td></tr>';
+
+  try {
+    const clientes = await getClientes(busca);
+    if (!clientes.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Nenhum cliente encontrado</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = clientes.map(c => `
+      <tr>
+        <td>
+          <div class="td-nome">
+            <div class="td-avatar">${iniciaisDe(c.nome)}</div>
+            <span class="td-nome-text">${c.nome}</span>
+          </div>
+        </td>
+        <td>${c.telefone || '—'}</td>
+        <td>${c.email || '—'}</td>
+        <td><span class="badge ${c.status === 'Ativo' ? 'badge--ok' : 'badge--muted'}">${c.status || 'Ativo'}</span></td>
+        <td>
+          <div class="tabela-acoes">
+            <button class="btn-tabela" onclick="abrirModalCliente('${c.id}')">Editar</button>
+            <button class="btn-tabela btn-tabela--danger" onclick="excluirCliente('${c.id}')">Excluir</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-state">Erro ao carregar clientes</td></tr>';
+    console.error(err);
+  }
+}
+
+let _clienteEditandoId = null;
+
+async function abrirModalCliente(id = null) {
+  _clienteEditandoId = id;
+
+  // Limpa campos
+  ['cli-nome','cli-tel','cli-email','cli-nasc'].forEach(f => {
+    const el = document.getElementById(f);
+    if (el) el.value = '';
+  });
+  document.getElementById('cli-status').value = 'Ativo';
+
+  const titulo = document.querySelector('#modal-cliente .modal-header h3');
+
+  if (id) {
+    titulo.textContent = 'Editar cliente';
+    try {
+      const c = await getClienteById(id);
+      if (c) {
+        document.getElementById('cli-nome').value  = c.nome || '';
+        document.getElementById('cli-tel').value   = c.telefone || '';
+        document.getElementById('cli-email').value = c.email || '';
+        document.getElementById('cli-nasc').value  = c.data_nascimento || '';
+        document.getElementById('cli-status').value = c.status || 'Ativo';
+      }
+    } catch (err) { console.error(err); }
+  } else {
+    titulo.textContent = 'Novo cliente';
+  }
+
+  document.getElementById('modal-cliente').classList.remove('oculto');
+}
+
+async function salvarCliente() {
+  const nome   = document.getElementById('cli-nome').value.trim();
+  const tel    = document.getElementById('cli-tel').value.trim();
+  const email  = document.getElementById('cli-email').value.trim();
+  const nasc   = document.getElementById('cli-nasc').value;
+  const status = document.getElementById('cli-status').value;
+
+  if (!nome) { mostrarToast('Informe o nome do paciente', 'error'); return; }
+
+  const dados = { nome, telefone: tel, email, data_nascimento: nasc, status };
+
+  try {
+    if (_clienteEditandoId) {
+      await updateCliente(_clienteEditandoId, dados);
+      mostrarToast('Cliente atualizado!', 'success');
+    } else {
+      await createCliente(dados);
+      mostrarToast('Cliente cadastrado!', 'success');
+    }
+    fecharModal('modal-cliente');
+    carregarClientes();
+    // Atualiza select de WhatsApp também
+    _preencherSelectClientes();
+  } catch (err) {
+    mostrarToast('Erro ao salvar cliente', 'error');
+    console.error(err);
+  }
+}
+
+async function excluirCliente(id) {
+  if (!confirm('Excluir este cliente? Esta ação não pode ser desfeita.')) return;
+  try {
+    await deleteCliente(id);
+    mostrarToast('Cliente excluído', 'success');
+    carregarClientes();
+  } catch (err) {
+    mostrarToast('Erro ao excluir cliente', 'error');
+  }
+}
+
+// ════════════════════════
+//  WHATSAPP
+// ════════════════════════
+
+async function carregarWhatsapp() {
+  await _preencherSelectClientes();
+}
+
+async function _preencherSelectClientes() {
+  const select = document.getElementById('wp-cliente-select');
+  if (!select) return;
+  const clientes = await getClientes();
+  select.innerHTML = '<option value="">— Escolha um paciente —</option>' +
+    clientes.map(c => `<option value="${c.id}" data-tel="${c.telefone || ''}">${c.nome}</option>`).join('');
+}
+
+async function wpSelecionarCliente(select) {
+  const option = select.options[select.selectedIndex];
+  const tel    = option?.dataset?.tel || '';
+  const id     = select.value;
+
+  document.getElementById('wp-numero').value = tel;
+
+  // Carrega histórico
+  const historicoEl = document.getElementById('wp-historico-lista');
+  if (!historicoEl) return;
+
+  if (!id) {
+    historicoEl.innerHTML = '<div class="empty-state">Selecione um paciente para ver o histórico</div>';
+    return;
+  }
+
+  historicoEl.innerHTML = '<div class="empty-state">Carregando histórico...</div>';
+  try {
+    const msgs = await getHistoricoMensagens(id);
+    if (!msgs.length) {
+      historicoEl.innerHTML = '<div class="empty-state">Nenhuma mensagem enviada ainda</div>';
+    } else {
+      historicoEl.innerHTML = msgs.map(m => `
+        <div>
+          <div class="historico-msg historico-msg--saida">
+            ${m.texto}
+          </div>
+          <div class="historico-msg-meta" style="text-align:right">
+            ${new Date(m.timestamp).toLocaleString('pt-br', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
+          </div>
+        </div>
+      `).join('');
+    }
+  } catch (err) {
+    historicoEl.innerHTML = '<div class="empty-state">Erro ao carregar histórico</div>';
+  }
+}
+
+const _mensagensRapidas = {
+  confirmar: (nome) =>
+    `Olá${nome ? ', ' + nome.split(' ')[0] : ''}! 👋\nPassando para confirmar sua consulta amanhã. Você poderá comparecer?\nPor favor, responda SIM para confirmar ou NÃO para cancelar.\n\nClínica WG`,
+  lembrete: (nome) =>
+    `Olá${nome ? ', ' + nome.split(' ')[0] : ''}! ⏰\nLembramos que você tem consulta agendada conosco. Não esqueça!\n\nQualquer dúvida, estamos à disposição.\nClínica WG`,
+  reagendar: (nome) =>
+    `Olá${nome ? ', ' + nome.split(' ')[0] : ''}! 📅\nGostaríamos de reagendar sua consulta. Qual dia e horário é melhor para você?\n\nAguardamos seu retorno.\nClínica WG`,
+};
+
+function wpMensagemRapida(tipo) {
+  const select  = document.getElementById('wp-cliente-select');
+  const nomeOpt = select?.options[select.selectedIndex]?.text || '';
+  const nome    = nomeOpt === '— Escolha um paciente —' ? '' : nomeOpt;
+  const fn      = _mensagensRapidas[tipo];
+  if (fn) document.getElementById('wp-mensagem').value = fn(nome);
+}
+
+async function wpEnviar() {
+  const select  = document.getElementById('wp-cliente-select');
+  const numero  = document.getElementById('wp-numero').value.trim();
+  const msg     = document.getElementById('wp-mensagem').value.trim();
+  const clienteId = select?.value || null;
+
+  if (!numero) { mostrarToast('Informe o número do WhatsApp', 'error'); return; }
+  if (!msg)    { mostrarToast('Escreva uma mensagem', 'error'); return; }
+
+  const btn = document.querySelector('#tela-whatsapp .btn-full');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+  try {
+    const numLimpo = numero.replace(/\D/g, '');
+    const resultado = await sendWhatsAppMessage(numLimpo, msg, clienteId);
+
+    if (resultado.sucesso) {
+      mostrarToast('Mensagem enviada! ✓', 'success');
+      document.getElementById('wp-mensagem').value = '';
+      // Recarrega histórico
+      if (clienteId) await wpSelecionarCliente(select);
+    }
+  } catch (err) {
+    mostrarToast('Erro ao enviar mensagem', 'error');
+    console.error(err);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> Enviar mensagem`;
+    }
+  }
+}
+
+// ════════════════════════
+//  CONFIGURAÇÕES
+// ════════════════════════
+
+async function carregarConfiguracoes() {
+  // Dados do usuário
+  const u = _usuarioAtual;
+  const nome  = u?.nome  || u?.user_metadata?.nome || '—';
+  const email = u?.email || '—';
+
+  _setText('config-nome',   nome);
+  _setText('config-email',  email);
+
+  const avatarEl = document.getElementById('config-avatar');
+  if (avatarEl) avatarEl.textContent = iniciaisDe(nome) || '—';
+
+  // Stats
+  try {
+    const kpis = await getKPIs();
+    _setText('config-total-clientes', kpis.totalClientes);
+    _setText('config-total-agend',    kpis.consultasHoje);
+  } catch (e) { /* silencioso */ }
+
+  // Assinatura
+  const statusEl = document.getElementById('assinatura-status');
+  const descEl   = document.getElementById('assinatura-desc');
+  const ativo    = await verificarAssinatura(u);
+
+  if (statusEl) statusEl.textContent = ativo ? '✓ Plano ativo' : '✕ Sem assinatura';
+  if (statusEl) statusEl.style.color = ativo ? 'var(--success)' : 'var(--danger)';
+  if (descEl)   descEl.textContent   = ativo
+    ? 'Você tem acesso completo ao sistema.'
+    : 'Assine um plano para continuar usando o sistema.';
+}
+
+// ════════════════════════
+//  HELPERS
+// ════════════════════════
+
+function _setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val ?? '—';
+}
+
+function _statusBadgeCls(status) {
+  const map = {
+    'Confirmado': 'badge--ok',
+    'Realizado':  'badge--blue',
+    'Aguardando': 'badge--pending',
+    'Faltou':     'badge--danger',
+  };
+  return map[status] || 'badge--muted';
+}
+
+// ════════════════════════
+//  EXPÕE GLOBAIS
+//  (necessário pois o módulo isola o escopo)
+// ════════════════════════
+
+window.navegar               = navegar;
+window.mostrarToast          = mostrarToast;
+window.carregarAgendamentos  = carregarAgendamentos;
+window.carregarClientes      = carregarClientes;
+window.carregarWhatsapp      = carregarWhatsapp;
+window.carregarConfiguracoes = carregarConfiguracoes;
+window.carregarDashboard     = carregarDashboard;
+
+window.abrirModalAgendamento = abrirModalAgendamento;
+window.fecharModal           = fecharModal;
+window.fecharModalSeFora     = fecharModalSeFora;
+window.salvarAgendamento     = salvarAgendamento;
+window.mudarStatusAgend      = mudarStatusAgend;
+window.excluirAgendamento    = excluirAgendamento;
+
+window.abrirModalCliente     = abrirModalCliente;
+window.salvarCliente         = salvarCliente;
+window.excluirCliente        = excluirCliente;
+
+window.wpSelecionarCliente   = wpSelecionarCliente;
+window.wpMensagemRapida      = wpMensagemRapida;
+window.wpEnviar              = wpEnviar;
+
+window.redirecionarParaPagamento = redirecionarParaPagamento;

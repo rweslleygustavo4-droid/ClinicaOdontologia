@@ -8,6 +8,7 @@
    as funções login(), cadastro() e logout()
    pelas chamadas à API do Supabase.
 ═══════════════════════════════════════════ */
+import { mostrarToast } from './toast.js';
 
 // ─── Verifica sessão ao carregar ───────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -354,3 +355,11 @@ document.addEventListener('keydown', (e) => {
   const loginVisivel = !document.getElementById('form-login').classList.contains('oculto');
   loginVisivel ? fazerLogin() : fazerCadastro();
 });
+
+// LIBERAR FUNÇÕES PARA O HTML (onclick)
+window.fazerLogin = fazerLogin;
+window.fazerCadastro = fazerCadastro;
+window.fazerLogout = fazerLogout;
+window.trocarAba = trocarAba;
+window.toggleSenha = toggleSenha;
+window.redirecionarParaPagamento = redirecionarParaPagamento;
